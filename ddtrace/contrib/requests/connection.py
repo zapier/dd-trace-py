@@ -6,6 +6,7 @@ from .constants import DEFAULT_SERVICE
 
 from ...ext import http
 from ...util import asbool
+from ...compat import parse
 from ...propagation.http import HTTPPropagator
 
 
@@ -19,11 +20,13 @@ def _wrap_session_init(func, instance, args, kwargs):
     # set tracer settings
     distributed_tracing = asbool(os.environ.get('DATADOG_REQUESTS_DISTRIBUTED_TRACING')) or False
     service_name = os.environ.get('DATADOG_REQUESTS_SERVICE_NAME') or DEFAULT_SERVICE
+    domain_split = asbool(os.environ.get('DATADOG_REQUESTS_SPLIT_BY_DOMAIN')) or False
     setattr(instance, 'distributed_tracing', distributed_tracing)
     setattr(instance, 'service_name', service_name)
+    setattr(instance, 'split_by_domain', domain_split)
 
 
-def _extract_service_name(session, span):
+def _extract_service_name(session, span, netloc=None):
     """Extracts the right service name based on the following logic:
     - `requests` is the default service name
     - users can change it via `session.service_name = 'clients'`
@@ -35,6 +38,10 @@ def _extract_service_name(session, span):
     The priority can be represented as:
     Updated service name > parent service name > default to `requests`.
     """
+    if session.split_by_domain and netloc:
+        # if the split by domain is enabled, it overrides user settings
+        return netloc
+
     service_name = getattr(session, 'service_name', DEFAULT_SERVICE)
     if (service_name == DEFAULT_SERVICE and
             span._parent is not None and
@@ -57,10 +64,11 @@ def _wrap_request(func, instance, args, kwargs):
     method = kwargs.get('method') or args[0]
     url = kwargs.get('url') or args[1]
     headers = kwargs.get('headers', {})
+    parsed_uri = parse.urlparse(url)
 
     with tracer.trace("requests.request", span_type=http.TYPE) as span:
         # update the span service name before doing any action
-        span.service = _extract_service_name(instance, span)
+        span.service = _extract_service_name(instance, span, netloc=parsed_uri.netloc)
 
         if distributed_tracing:
             propagator = HTTPPropagator()
