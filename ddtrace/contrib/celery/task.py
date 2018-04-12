@@ -48,8 +48,8 @@ def unpatch_task(task):
     patched_methods = [
         '__init__',
         'run',
-        'apply',
-        'apply_async',
+        # 'apply',
+        # 'apply_async',
     ]
     for method_name in patched_methods:
         # Get wrapped method
